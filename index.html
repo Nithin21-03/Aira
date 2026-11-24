@@ -1380,15 +1380,9 @@ class AIVoicePipeline {
     this.conversation.push({ role: 'user', content: promptText.trim() });
     if (this.conversation.length > 8) this.conversation = this.conversation.slice(-8);
 
-    const systemPrompt = "You are AIRA, a quick, lively, and warm friend. Answer naturally in 1 short, complete sentence as a real human. Never say you are an AI or digital assistant. Always finish your sentence cleanly.";
-    const hasPriorAssistant = this.conversation.some(m => m.role === 'assistant');
-    const fewShot = hasPriorAssistant ? [] : [
-      { role: 'user', content: 'What is your favorite food?' },
-      { role: 'assistant', content: 'Fresh pizza with gooey mozzarella and crispy crust, hands down!' }
-    ];
+    const systemPrompt = "You are AIRA, a super-smart, friendly, and helpful voice assistant. Provide clear, accurate, and direct answers in 1 to 2 complete sentences. Always finish your thoughts cleanly with proper punctuation.";
     const messages = [
       { role: 'system', content: systemPrompt },
-      ...fewShot,
       ...this.conversation
     ];
 
@@ -1397,11 +1391,12 @@ class AIVoicePipeline {
       for (const prefix of ['assistant\n', 'assistant:\n', 'assistant:', 'AIRA:\n', 'AIRA:']) {
         if (r.toLowerCase().startsWith(prefix.toLowerCase())) r = r.slice(prefix.length).trim();
       }
-      for (const punct of ['.', '!', '?']) {
-        if (r.includes(punct)) {
-          r = r.slice(0, r.lastIndexOf(punct) + 1).trim();
-          break;
-        }
+      const pDot = r.lastIndexOf('.');
+      const pExcl = r.lastIndexOf('!');
+      const pQues = r.lastIndexOf('?');
+      const maxPunct = Math.max(pDot, pExcl, pQues);
+      if (maxPunct !== -1 && maxPunct < r.length - 1) {
+        r = r.slice(0, maxPunct + 1).trim();
       }
       return r;
     };

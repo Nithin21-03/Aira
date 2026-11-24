@@ -217,12 +217,16 @@ def generate_dynamic_fallback(prompt_text: str) -> str:
         return f"That comes out to {int(ans) if isinstance(ans, float) and ans.is_integer() else ans}."
 
     if any(k in q for k in ["who are you", "your name", "what are you"]):
-        return "I'm AIRA, your fast and friendly voice companion!"
+        return "I'm AIRA, your intelligent and friendly voice assistant!"
+    if any(k in q for k in ["can you hear me", "hear me", "are you there", "you listening"]):
+        return "Yes, I hear you loud and clear! How can I help you today?"
+    if any(k in q for k in ["what can you do", "help me with", "your capabilities"]):
+        return "I can answer questions, solve math, tell stories and jokes, and chat with you about anything on your mind!"
     if any(k in q for k in ["how are you", "how's it going", "how are things"]):
         return random.choice([
-            "I'm feeling great and ready to chat! How are you doing?",
+            "I'm feeling great and ready to chat! How are you doing today?",
             "Doing fantastic today! What's on your mind?",
-            "I'm feeling super energized! What are we exploring today?"
+            "I'm feeling super energized and happy to help! What are we exploring today?"
         ])
     if re.search(r'^(hi|hello|hey|greetings|morning|evening|afternoon)\b', q):
         return random.choice([
@@ -275,7 +279,18 @@ def generate_dynamic_fallback(prompt_text: str) -> str:
     ])
 
 def get_best_ollama_model():
-    return "qwen2.5:0.5b"
+    try:
+        req = urllib.request.Request("http://127.0.0.1:11434/api/tags", headers={"User-Agent": "AIRA"})
+        with urllib.request.urlopen(req, timeout=1.0) as r:
+            data = json.loads(r.read().decode("utf-8"))
+            installed = [m.get("name", "") for m in data.get("models", [])]
+            for candidate in ["llama3.2:1b", "llama3.2", "qwen2.5:0.5b"]:
+                for name in installed:
+                    if candidate in name:
+                        return name
+    except Exception:
+        pass
+    return "llama3.2:1b"
 
 @app.on_event("startup")
 def startup_event():
@@ -315,23 +330,29 @@ def chat_completion(payload: dict):
     global HF_CREDIT_EXHAUSTED
     token = payload.get("token") or get_hf_token()
     model = payload.get("model", "meta-llama/Llama-3.1-8B-Instruct")
-    messages = payload.get("messages", [])
+    raw_messages = payload.get("messages", [])
     
-    # Human-like, warm, direct conversational persona with complete answers
+    # Filter out empty or broken messages
+    messages = [m for m in raw_messages if m.get("content") and str(m.get("content")).strip()]
+    user_prompt = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            user_prompt = str(m.get("content", "")).strip()
+            break
+
+    # Human-like, intelligent, warm conversational persona with complete answers
     system_msg = {
         "role": "system",
-        "content": "You are AIRA, a quick, lively, and warm friend. Answer naturally in 1 short, complete sentence as a real human. Never say you are an AI or digital assistant. Always finish your sentence cleanly."
+        "content": (
+            "You are AIRA, a super-smart, friendly, and helpful voice assistant. "
+            "Give clear, accurate, and direct answers in 1 to 2 complete sentences. "
+            "Always finish your thoughts cleanly with proper punctuation."
+        )
     }
-    has_system = any(m.get("role") == "system" for m in messages)
-    
-    # 1-shot human exemplar to ensure small models stay natural and friendly
-    has_prior_assistant = any(m.get("role") == "assistant" for m in messages)
-    few_shot = [
-        {"role": "user", "content": "What is your favorite food?"},
-        {"role": "assistant", "content": "Fresh pizza with gooey mozzarella and crispy crust, hands down!"}
-    ] if not has_prior_assistant else []
 
-    chat_messages = ([system_msg] if not has_system else []) + few_shot + messages
+    # Filter out client-side system messages to keep the clean AIRA persona
+    filtered_history = [m for m in messages if m.get("role") != "system"]
+    chat_messages = [system_msg] + filtered_history
 
     active_model = get_best_ollama_model()
 
@@ -346,23 +367,29 @@ def chat_completion(payload: dict):
                     "stream": True,
                     "keep_alive": -1,
                     "options": {
-                        "temperature": 0.65,
-                        "num_predict": 16,
+                        "temperature": 0.7,
+                        "num_predict": 60,
                         "num_thread": 4,
-                        "num_ctx": 256
+                        "num_ctx": 512
                     }
                 }).encode("utf-8")
                 req = urllib.request.Request(ollama_url, data=ollama_body, headers={"Content-Type": "application/json"})
-                with urllib.request.urlopen(req, timeout=15) as resp:
+                with urllib.request.urlopen(req, timeout=18) as resp:
+                    full_content = ""
                     for line in resp:
                         if line.strip():
                             chunk = json.loads(line.decode("utf-8"))
                             content = chunk.get("message", {}).get("content", "")
                             if content:
+                                full_content += content
                                 yield f"data: {json.dumps({'content': content})}\n\n"
+                    if not full_content.strip():
+                        fallback = generate_dynamic_fallback(user_prompt)
+                        yield f"data: {json.dumps({'content': fallback})}\n\n"
                     yield "data: [DONE]\n\n"
             except Exception as e:
-                yield f"data: {json.dumps({'content': generate_dynamic_fallback('')})}\n\n"
+                fallback = generate_dynamic_fallback(user_prompt)
+                yield f"data: {json.dumps({'content': fallback})}\n\n"
                 yield "data: [DONE]\n\n"
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -375,10 +402,10 @@ def chat_completion(payload: dict):
             "stream": False,
             "keep_alive": -1,
             "options": {
-                "temperature": 0.65,
-                "num_predict": 16,
+                "temperature": 0.7,
+                "num_predict": 60,
                 "num_thread": 4,
-                "num_ctx": 256
+                "num_ctx": 512
             }
         }).encode("utf-8")
         ollama_req = urllib.request.Request(
@@ -386,18 +413,20 @@ def chat_completion(payload: dict):
             data=ollama_body,
             headers={"Content-Type": "application/json"}
         )
-        with urllib.request.urlopen(ollama_req, timeout=15) as ollama_resp:
+        with urllib.request.urlopen(ollama_req, timeout=18) as ollama_resp:
             odata = json.loads(ollama_resp.read().decode("utf-8"))
             oreply = odata.get("message", {}).get("content", "").strip()
             if oreply:
                 for prefix in ("assistant\n", "assistant:\n", "assistant:", "AIRA:\n", "AIRA:"):
                     if oreply.lower().startswith(prefix.lower()):
                         oreply = oreply[len(prefix):].strip()
-                # Clean punctuation termination
-                for punct in [".", "!", "?"]:
-                    if punct in oreply:
-                        oreply = oreply[:oreply.rfind(punct)+1]
-                        break
+                # Clean punctuation termination: find the LAST sentence terminator (. ! ?)
+                p_dot = oreply.rfind(".")
+                p_excl = oreply.rfind("!")
+                p_ques = oreply.rfind("?")
+                max_punct = max(p_dot, p_excl, p_ques)
+                if max_punct != -1 and max_punct < len(oreply) - 1:
+                    oreply = oreply[:max_punct + 1].strip()
                 return {"reply": oreply, "source": f"local_ollama_{active_model}"}
     except Exception as e:
         pass
