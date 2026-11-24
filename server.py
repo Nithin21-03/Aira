@@ -12,16 +12,29 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="AIRA Voice Assistant Server")
 
-# Allow CORS for browser access
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Allow full CORS and Chrome Private Network Access (PNA) for browser access (including file:/// origins)
+@app.middleware("http")
+async def cors_and_pna_middleware(request, call_next):
+    origin = request.headers.get("origin") or "*"
+    # Handle CORS / Chrome Private Network Access preflights
+    if request.method == "OPTIONS":
+        response = Response(status_code=200)
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        if "access-control-request-private-network" in request.headers:
+            response.headers["Access-Control-Allow-Private-Network"] = "true"
+        return response
+
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+INDEX_FILE = os.path.join(BASE_DIR, "index.html")
 HTML_FILE = os.path.join(BASE_DIR, "AIRA_JARVIS_homepage (3).html")
 MODEL_FILE = os.path.join(BASE_DIR, "viseme-model.bin")
 
@@ -60,9 +73,10 @@ def ensure_ollama():
 
 @app.get("/")
 def serve_index():
-    if os.path.exists(HTML_FILE):
-        return FileResponse(HTML_FILE, media_type="text/html")
-    return {"message": "AIRA JARVIS HTML file not found."}
+    for f in [INDEX_FILE, HTML_FILE]:
+        if os.path.exists(f):
+            return FileResponse(f, media_type="text/html")
+    return {"message": "AIRA HTML file not found."}
 
 @app.get("/viseme-model.bin")
 def serve_model():
@@ -129,13 +143,18 @@ def speech_to_text(audio: UploadFile = File(...), token: str = Form(None), model
     
     # Ensure audio is clean 16kHz PCM WAV for speech recognition
     audio_bytes = decode_audio_to_wav(raw_bytes)
+    print(f"[AIRA STT] Received audio: {len(raw_bytes)} bytes, decoded to: {len(audio_bytes)} bytes")
     
     # 1. Primary: Local Faster-Whisper (OpenAI Whisper engine, offline, ultra-fast & accurate)
     try:
         wm = get_whisper()
         if wm:
-            segments, _ = wm.transcribe(io.BytesIO(audio_bytes), language="en", beam_size=1)
+            segments, _ = wm.transcribe(io.BytesIO(audio_bytes), language="en", beam_size=1, condition_on_previous_text=False)
             whisper_text = " ".join([s.text for s in segments]).strip()
+            if not whisper_text:
+                # If language was not pure English, try auto-detection
+                segments, _ = wm.transcribe(io.BytesIO(audio_bytes), beam_size=1, condition_on_previous_text=False)
+                whisper_text = " ".join([s.text for s in segments]).strip()
             if whisper_text:
                 print(f"[AIRA Whisper STT] Recognized: \"{whisper_text}\"")
                 return {"text": whisper_text, "source": "whisper"}
@@ -149,6 +168,7 @@ def speech_to_text(audio: UploadFile = File(...), token: str = Form(None), model
             audio_data = recognizer.record(source)
             text = recognizer.recognize_google(audio_data)
             if text and text.strip():
+                print(f"[AIRA Google STT] Recognized: \"{text.strip()}\"")
                 return {"text": text.strip(), "source": "google_speech"}
     except Exception:
         pass
@@ -169,11 +189,14 @@ def speech_to_text(audio: UploadFile = File(...), token: str = Form(None), model
         try:
             with urllib.request.urlopen(req, timeout=6) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                return {"text": data.get("text", "")}
+                recognized = data.get("text", "").strip()
+                if recognized:
+                    return {"text": recognized, "source": "huggingface"}
         except Exception:
             pass
 
-    return {"text": ""}
+    print("[AIRA STT] No speech detected in audio clip.")
+    return {"text": "", "source": "none"}
 
 def generate_dynamic_fallback(prompt_text: str) -> str:
     import random

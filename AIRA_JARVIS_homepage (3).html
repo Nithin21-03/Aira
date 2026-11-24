@@ -216,6 +216,13 @@ h1{margin:2.2vh 0 2.2vh -.04em;font-weight:100;font-size:clamp(52px,5.1vw,104px)
 
 (()=>{
 'use strict';
+
+// Auto-redirect to local server when opened via file:/// for secure context & optimal audio access
+if (window.location.protocol === 'file:') {
+  fetch('http://127.0.0.1:8000/api/status', { mode: 'cors' })
+    .then(r => { if (r.ok) window.location.href = 'http://localhost:8000'; })
+    .catch(() => {});
+}
 const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const $ = id=>document.getElementById(id);
 const rnd=(a,b)=>a+Math.random()*(b-a);
@@ -474,6 +481,7 @@ async function handleMicClick() {
 
     let speechDetected = false;
     let silenceAfterSpeechTimer = null;
+    let voiceActiveFrames = 0;
 
     await aiPipeline.startRecording(
       text => {
@@ -499,23 +507,41 @@ async function handleMicClick() {
         }
       },
       (rms, pct) => {
-        // Visual volume feedback so user knows their mic is physically picking up sound
-        if (!speechDetected && dialogueEl && state === 'listening') {
-          if (pct > 8) {
-            dialogueEl.textContent = `Listening... [🎙️ Volume: ${pct}%] (I hear you)`;
+        // Voice Activity Detection (VAD) via real-time audio volume
+        if (state !== 'listening') return;
+
+        if (pct >= 8) {
+          voiceActiveFrames++;
+          if (voiceActiveFrames >= 2) {
+            speechDetected = true;
+            clearTimeout(silenceTimer);
+            clearTimeout(silenceAfterSpeechTimer);
+            silenceAfterSpeechTimer = null;
+            if (dialogueEl && !aiPipeline.interimText) {
+              dialogueEl.textContent = `Listening... [🎙️ Volume: ${pct}%] (Hearing voice...)`;
+            }
+          }
+        } else {
+          // In silence / pause
+          if (speechDetected) {
+            if (!silenceAfterSpeechTimer) {
+              silenceAfterSpeechTimer = setTimeout(() => {
+                if (state === 'listening') handleMicClick();
+              }, 1250);
+            }
           } else {
-            dialogueEl.textContent = 'Listening... (Speak naturally 🎙️)';
+            if (dialogueEl) dialogueEl.textContent = 'Listening... (Speak naturally 🎙️)';
           }
         }
       }
     );
 
-    // 10s fallback timeout if user hasn't spoken
+    // 12s fallback timeout if user hasn't spoken at all
     silenceTimer = setTimeout(() => {
       if (state === 'listening' && !speechDetected) {
         handleMicClick();
       }
-    }, 10000);
+    }, 12000);
 
   } else if (state === 'listening') {
     // User finished talking or clicked mic -> Stop and submit immediately
@@ -528,10 +554,12 @@ async function handleMicClick() {
 
       if (!userText || !userText.trim()) {
         const peak = aiPipeline.maxRms || 0;
-        if (peak < 0.005) {
-          if (dialogueEl) dialogueEl.textContent = "Mic input was completely silent (0%). Check if your laptop mic is muted (F8/F9 key or Windows sound settings).";
+        if (aiPipeline.lastSttError) {
+          if (dialogueEl) dialogueEl.textContent = "STT Connection Notice: " + aiPipeline.lastSttError + ". Ensure server.py is running on port 8000.";
+        } else if (peak < 0.005) {
+          if (dialogueEl) dialogueEl.textContent = "Mic input was completely silent (0%). Check if your laptop mic is unmuted (F8/F9 key or Windows sound settings).";
         } else {
-          if (dialogueEl) dialogueEl.textContent = "Didn't catch any words. Tap the mic or type below!";
+          if (dialogueEl) dialogueEl.textContent = "Whisper didn't catch words clearly. Tap the mic to try again!";
         }
         setState('idle');
         return;
@@ -1304,6 +1332,7 @@ class AIVoicePipeline {
   }
 
   async transcribe(blob, fallbackText) {
+    this.lastSttError = null;
     // 1. Primary: Send clean recorded audio directly to Whisper AI STT
     if (blob && blob.size > 200) {
       try {
@@ -1311,19 +1340,26 @@ class AIVoicePipeline {
         const ext = (blob.type && blob.type.includes('wav')) ? 'speech.wav' : 'speech.webm';
         fd.append('audio', blob, ext);
         const sttUrl = (window.location.protocol === 'file:') ? 'http://127.0.0.1:8000/api/stt' : '/api/stt';
+        console.log(`[AIRA Whisper STT] Uploading audio (${blob.size} bytes, ${blob.type}) to ${sttUrl}...`);
         const res = await fetch(sttUrl, {
           method: 'POST',
           body: fd,
-          signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(10000) : undefined
+          signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(12000) : undefined
         });
         if (res.ok) {
           const data = await res.json();
           if (data && data.text && data.text.trim()) {
             console.log('[AIRA Whisper STT] Transcribed successfully:', data.text.trim());
             return data.text.trim();
+          } else {
+            console.log('[AIRA Whisper STT] No speech detected in audio clip');
           }
+        } else {
+          this.lastSttError = `Server returned HTTP ${res.status}`;
+          console.warn('[AIRA Whisper STT] HTTP error:', res.status);
         }
       } catch (e) {
+        this.lastSttError = e.message || String(e);
         console.warn('Whisper STT error, falling back to Web Speech:', e);
       }
     }
