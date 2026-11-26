@@ -498,10 +498,16 @@ async function sendPrompt(userText) {
       // Live Sub-Second Streaming Speech: Voice sentence 1 immediately when complete!
       unvoicedBuffer = streamChunk;
       if (!hasVoicedAny) {
-        const sentenceMatch = unvoicedBuffer.match(/^([^\.\!\?]+[\.\!\?])\s+(.*)/);
-        if (sentenceMatch && sentenceMatch[1] && sentenceMatch[1].trim().split(/\s+/).length >= 3) {
+        let pIdx = -1;
+        for (const p of ['.', '!', '?']) {
+          const idx = unvoicedBuffer.indexOf(p);
+          if (idx !== -1 && (pIdx === -1 || idx < pIdx)) {
+            pIdx = idx;
+          }
+        }
+        if (pIdx !== -1 && unvoicedBuffer.slice(0, pIdx + 1).trim().split(/\s+/).length >= 2) {
           hasVoicedAny = true;
-          queueSpeechChunk(sentenceMatch[1].trim());
+          queueSpeechChunk(unvoicedBuffer.slice(0, pIdx + 1).trim());
         }
       }
     });
@@ -511,9 +517,16 @@ async function sendPrompt(userText) {
     if (!hasVoicedAny) {
       queueSpeechChunk(replyText);
     } else {
-      const sentenceMatch = replyText.match(/^([^\.\!\?]+[\.\!\?])\s+(.*)/);
-      if (sentenceMatch && sentenceMatch[2] && sentenceMatch[2].trim()) {
-        queueSpeechChunk(sentenceMatch[2].trim());
+      let pIdx = -1;
+      for (const p of ['.', '!', '?']) {
+        const idx = replyText.indexOf(p);
+        if (idx !== -1 && (pIdx === -1 || idx < pIdx)) {
+          pIdx = idx;
+        }
+      }
+      if (pIdx !== -1) {
+        const remaining = replyText.slice(pIdx + 1).trim();
+        if (remaining) queueSpeechChunk(remaining);
       }
     }
   } catch (err) {
@@ -578,7 +591,7 @@ async function handleMicClick() {
             if (!silenceAfterSpeechTimer) {
               silenceAfterSpeechTimer = setTimeout(() => {
                 if (state === 'listening') handleMicClick();
-              }, 750);
+              }, 450);
             }
           } else {
             if (dialogueEl) dialogueEl.textContent = 'Listening... (Speak naturally 🎙️)';
@@ -670,7 +683,7 @@ function speakTextWithVisemes(rawText, onDone) {
     return;
   }
   stopSpeech();
-  const rate = 1.05;
+  const rate = 1.15;
   const tl = buildTL(text, rate);
   sp = { mode: 'tl', text, tl, t0: tt + 0.1, idx: 0, lastB: -9 };
   setState('speaking');
@@ -1553,7 +1566,7 @@ class AIVoicePipeline {
           messages,
           stream: false,
           keep_alive: -1,
-          options: { temperature: 0.6, num_predict: 90, num_thread: 4 }
+          options: { temperature: 0.5, num_predict: 75, num_thread: 4, num_ctx: 256 }
         }),
         signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(20000) : undefined
       });

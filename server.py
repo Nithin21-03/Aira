@@ -344,9 +344,10 @@ def chat_completion(payload: dict):
     system_msg = {
         "role": "system",
         "content": (
-            "You are AIRA, a brilliant, direct, and knowledgeable AI voice assistant. "
-            "Give an accurate, factual, and complete answer in 1 or 2 concise sentences. "
-            "Never leave a thought or sentence unfinished. Always include the full punchline or conclusion."
+            "You are AIRA, a lightning-fast voice AI companion. "
+            "Reply in 1 or 2 concise, complete sentences (maximum 20 words). "
+            "Answer immediately and directly with zero introductory fluff. "
+            "Always include complete facts or punchlines."
         )
     }
 
@@ -367,10 +368,10 @@ def chat_completion(payload: dict):
                     "stream": True,
                     "keep_alive": -1,
                     "options": {
-                        "temperature": 0.6,
-                        "num_predict": 90,
+                        "temperature": 0.5,
+                        "num_predict": 75,
                         "num_thread": 4,
-                        "num_ctx": 512
+                        "num_ctx": 256
                     }
                 }).encode("utf-8")
                 req = urllib.request.Request(ollama_url, data=ollama_body, headers={"Content-Type": "application/json"})
@@ -402,10 +403,10 @@ def chat_completion(payload: dict):
             "stream": False,
             "keep_alive": -1,
             "options": {
-                "temperature": 0.6,
-                "num_predict": 90,
+                "temperature": 0.5,
+                "num_predict": 75,
                 "num_thread": 4,
-                "num_ctx": 512
+                "num_ctx": 256
             }
         }).encode("utf-8")
         ollama_req = urllib.request.Request(
