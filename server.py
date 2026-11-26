@@ -2,6 +2,7 @@ import os
 import io
 import json
 import wave
+import threading
 import urllib.request
 import urllib.error
 import speech_recognition as sr
@@ -37,6 +38,132 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_FILE = os.path.join(BASE_DIR, "index.html")
 HTML_FILE = os.path.join(BASE_DIR, "AIRA_JARVIS_homepage (3).html")
 MODEL_FILE = os.path.join(BASE_DIR, "viseme-model.bin")
+MEMORY_FILE = os.path.join(BASE_DIR, "aira_memory.json")
+memory_lock = threading.Lock()
+
+def load_memory() -> dict:
+    default_mem = {
+        "user_name": None,
+        "facts": [],
+        "recent_chats": []
+    }
+    if not os.path.exists(MEMORY_FILE):
+        return default_mem
+    try:
+        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, dict):
+                return {**default_mem, **data}
+    except Exception as e:
+        print(f"[AIRA Memory] Notice loading memory: {e}")
+    return default_mem
+
+def save_memory(mem: dict):
+    with memory_lock:
+        try:
+            with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+                json.dump(mem, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"[AIRA Memory] Notice saving memory: {e}")
+
+def get_memory_prompt_summary() -> str:
+    mem = load_memory()
+    parts = []
+    if mem.get("user_name"):
+        parts.append(f"User's name is {mem['user_name']}.")
+    facts = mem.get("facts", [])
+    if facts:
+        distinct = []
+        for fact in reversed(facts):
+            if fact not in distinct:
+                distinct.append(fact)
+            if len(distinct) >= 6:
+                break
+        distinct.reverse()
+        parts.append("Learned facts: " + "; ".join(distinct))
+    return " ".join(parts).strip()
+
+def extract_and_update_memory(user_text: str, assistant_reply: str = None):
+    t = (user_text or "").strip()
+    if not t:
+        return
+    import re
+    mem = load_memory()
+    updated = False
+
+    # Reset command
+    if re.search(r'\b(forget everything|clear your memory|reset memory|forget my info)\b', t, re.IGNORECASE):
+        mem = {"user_name": None, "facts": [], "recent_chats": []}
+        save_memory(mem)
+        print("[AIRA Memory] Memory cleared by user command.")
+        return
+
+    # Name extraction
+    m_name = re.search(r'(?:my name is|call me|i am called)\s+([A-Z][a-z]+|[a-z]+)', t, re.IGNORECASE)
+    if m_name and m_name.group(1).lower() not in ['a', 'an', 'the', 'not', 'here', 'ready', 'talking', 'listening', 'aira', 'jarvis']:
+        name = m_name.group(1).strip().capitalize()
+        if mem.get("user_name") != name:
+            mem["user_name"] = name
+            updated = True
+            fact = f"User's name is {name}."
+            if fact not in mem["facts"]:
+                mem["facts"].append(fact)
+
+    # Explicit remember command
+    m_rem = re.search(r'(?:remember that|don\'t forget that|please remember)\s+(.*)', t, re.IGNORECASE)
+    if m_rem:
+        fact = m_rem.group(1).strip()
+        if fact and fact not in mem["facts"]:
+            mem["facts"].append(fact)
+            updated = True
+
+    # Favorites
+    m_fav = re.search(r'(?:my favorite\s+([a-z\s]+?)\s+is\s+([^.!?]+))', t, re.IGNORECASE)
+    if m_fav:
+        fact = f"User's favorite {m_fav.group(1).strip()} is {m_fav.group(2).strip()}."
+        if fact not in mem["facts"]:
+            mem["facts"].append(fact)
+            updated = True
+
+    # Likes & hobbies
+    m_like = re.search(r'(?:i (?:really )?(?:love|like|prefer|enjoy))\s+([^.!?]+)', t, re.IGNORECASE)
+    if m_like and not m_rem:
+        fact = f"User likes {m_like.group(1).strip()}."
+        if fact not in mem["facts"]:
+            mem["facts"].append(fact)
+            updated = True
+
+    # Projects & work
+    m_work = re.search(r'(?:i am working on|i\'m building|i am building|i develop)\s+([^.!?]+)', t, re.IGNORECASE)
+    if m_work:
+        fact = f"User is working on {m_work.group(1).strip()}."
+        if fact not in mem["facts"]:
+            mem["facts"].append(fact)
+            updated = True
+
+    # Location
+    m_live = re.search(r'(?:i live in|i am from|i\'m from)\s+([^.!?]+)', t, re.IGNORECASE)
+    if m_live:
+        fact = f"User lives in {m_live.group(1).strip()}."
+        if fact not in mem["facts"]:
+            mem["facts"].append(fact)
+            updated = True
+
+    # Record turn
+    from datetime import datetime
+    chat_entry = {"time": datetime.now().isoformat(), "user": t}
+    if assistant_reply:
+        chat_entry["assistant"] = assistant_reply
+    if "recent_chats" not in mem:
+        mem["recent_chats"] = []
+    mem["recent_chats"].append(chat_entry)
+    if len(mem["recent_chats"]) > 60:
+        mem["recent_chats"] = mem["recent_chats"][-60:]
+    updated = True
+
+    if updated:
+        save_memory(mem)
+        print(f"[AIRA Memory] Saved memory. Name: {mem.get('user_name')}, Total facts: {len(mem.get('facts', []))}")
 
 def get_hf_token():
     return os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or ""
@@ -202,6 +329,24 @@ def generate_dynamic_fallback(prompt_text: str) -> str:
     import random
     q = (prompt_text or "").strip().lower()
     
+    # 0. Persistent Memory queries & commands
+    mem = load_memory()
+    if any(k in q for k in ["what is my name", "who am i", "do you know my name", "what's my name", "remember my name"]):
+        if mem.get("user_name"):
+            return f"Your name is {mem['user_name']}!"
+        return "I don't know your name yet. What should I call you?"
+
+    if any(k in q for k in ["what do you remember about me", "what do you know about me", "what did i tell you", "what have i told you", "what are my facts"]):
+        facts = mem.get("facts", [])
+        if facts:
+            summary = "; ".join(facts[-4:])
+            return f"Here is what I remember about you: {summary}"
+        return "I don't have any specific facts saved about you yet. Tell me about yourself!"
+
+    if any(k in q for k in ["forget everything", "clear your memory", "reset memory", "forget me"]):
+        save_memory({"user_name": None, "facts": [], "recent_chats": []})
+        return "I have cleared my memory. We can start completely fresh!"
+
     # 1. Math check
     import re
     math_match = re.search(r'(\d+(?:\.\d+)?)\s*([\+\-\*\/xX]|plus|minus|times|divided by)\s*(\d+(?:\.\d+)?)', q)
@@ -340,15 +485,18 @@ def chat_completion(payload: dict):
             user_prompt = str(m.get("content", "")).strip()
             break
 
-    # Human-like, intelligent, knowledgeable voice assistant persona
+    # Human-like, intelligent, knowledgeable voice assistant persona with persistent memory
+    mem_summary = get_memory_prompt_summary()
+    system_content = (
+        "You are AIRA, a lightning-fast voice AI companion with persistent memory. "
+        + (f"USER MEMORY CONTEXT: {mem_summary}. " if mem_summary else "")
+        + "Reply in 1 or 2 concise, complete sentences (maximum 22 words). "
+        "Answer immediately and directly with zero introductory fluff. "
+        "Always use your memory when asked about the user."
+    )
     system_msg = {
         "role": "system",
-        "content": (
-            "You are AIRA, a lightning-fast voice AI companion. "
-            "Reply in 1 or 2 concise, complete sentences (maximum 20 words). "
-            "Answer immediately and directly with zero introductory fluff. "
-            "Always include complete facts or punchlines."
-        )
+        "content": system_content
     }
 
     # Filter out client-side system messages to keep the clean AIRA persona
@@ -384,7 +532,9 @@ def chat_completion(payload: dict):
                             if content:
                                 full_content += content
                                 yield f"data: {json.dumps({'content': content})}\n\n"
-                    if not full_content.strip():
+                    if full_content.strip():
+                        threading.Thread(target=extract_and_update_memory, args=(user_prompt, full_content.strip()), daemon=True).start()
+                    else:
                         fallback = generate_dynamic_fallback(user_prompt)
                         yield f"data: {json.dumps({'content': fallback})}\n\n"
                     yield "data: [DONE]\n\n"
@@ -428,6 +578,7 @@ def chat_completion(payload: dict):
                 max_punct = max(p_dot, p_excl, p_ques)
                 if max_punct != -1 and max_punct < len(oreply) - 1:
                     oreply = oreply[:max_punct + 1].strip()
+                threading.Thread(target=extract_and_update_memory, args=(user_prompt, oreply), daemon=True).start()
                 return {"reply": oreply, "source": f"local_ollama_{active_model}"}
     except Exception as e:
         pass
@@ -552,6 +703,27 @@ def text_to_speech(payload: dict):
         raise HTTPException(status_code=e.code, detail=f"Hugging Face TTS Error: {err_msg}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/memory")
+def get_memory_api():
+    return load_memory()
+
+@app.post("/api/memory")
+def add_memory_api(payload: dict):
+    mem = load_memory()
+    name = payload.get("name")
+    fact = payload.get("fact")
+    if name:
+        mem["user_name"] = str(name).strip().capitalize()
+    if fact and str(fact).strip() not in mem.get("facts", []):
+        mem.setdefault("facts", []).append(str(fact).strip())
+    save_memory(mem)
+    return {"status": "ok", "memory": mem}
+
+@app.delete("/api/memory")
+def clear_memory_api():
+    save_memory({"user_name": None, "facts": [], "recent_chats": []})
+    return {"status": "cleared", "message": "Memory reset successfully."}
 
 if __name__ == "__main__":
     import uvicorn

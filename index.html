@@ -1240,8 +1240,33 @@ class AIVoicePipeline {
     this.recStream = null;
     this.interimText = '';
     this.isRecording = false;
-    this.conversation = [];
+    try {
+      const savedConv = localStorage.getItem('AIRA_CONVERSATION_HISTORY');
+      this.conversation = savedConv ? JSON.parse(savedConv) : [];
+      if (!Array.isArray(this.conversation)) this.conversation = [];
+    } catch (e) {
+      this.conversation = [];
+    }
     this.sr = null;
+  }
+
+  saveConversation() {
+    try {
+      if (this.conversation.length > 20) {
+        this.conversation = this.conversation.slice(-20);
+      }
+      localStorage.setItem('AIRA_CONVERSATION_HISTORY', JSON.stringify(this.conversation));
+    } catch (e) {}
+  }
+
+  clearMemory() {
+    this.conversation = [];
+    localStorage.removeItem('AIRA_CONVERSATION_HISTORY');
+    localStorage.removeItem('AIRA_USER_NAME');
+    try {
+      const serverUrl = (window.location.protocol === 'file:') ? 'http://127.0.0.1:8000/api/memory' : '/api/memory';
+      fetch(serverUrl, { method: 'DELETE' }).catch(() => {});
+    } catch(e) {}
   }
 
   saveConfig(token, stt, llm, tts) {
@@ -1466,8 +1491,22 @@ class AIVoicePipeline {
     if (!promptText || !promptText.trim()) {
       return "I didn't hear anything. Please try speaking again.";
     }
-    this.conversation.push({ role: 'user', content: promptText.trim() });
-    if (this.conversation.length > 8) this.conversation = this.conversation.slice(-8);
+    const userPrompt = promptText.trim();
+    this.conversation.push({ role: 'user', content: userPrompt });
+    this.saveConversation();
+
+    // Check for clear memory voice command
+    if (/\b(forget everything|clear your memory|reset memory|forget my info)\b/i.test(userPrompt)) {
+      this.clearMemory();
+      return "I have cleared my memory. We can start completely fresh!";
+    }
+
+    // Name extraction for quick client-side recall
+    const nameMatch = userPrompt.match(/(?:my name is|call me|i am called)\s+([a-z]+)/i);
+    if (nameMatch && !['a', 'an', 'the', 'not', 'here', 'ready', 'aira', 'jarvis'].includes(nameMatch[1].toLowerCase())) {
+      const n = nameMatch[1].charAt(0).toUpperCase() + nameMatch[1].slice(1);
+      localStorage.setItem('AIRA_USER_NAME', n);
+    }
 
     const systemPrompt = "You are AIRA, a super-smart, friendly, and helpful voice assistant. Provide clear, accurate, and direct answers in 1 to 2 complete sentences. Always finish your thoughts cleanly with proper punctuation.";
     const messages = [
@@ -1531,6 +1570,7 @@ class AIVoicePipeline {
         let finalized = cleanReply(fullReply);
         if (finalized) {
           this.conversation.push({ role: 'assistant', content: finalized });
+          this.saveConversation();
           return finalized;
         }
       }
@@ -1551,6 +1591,7 @@ class AIVoicePipeline {
         if (data && data.reply && data.reply.trim()) {
           const reply = cleanReply(data.reply);
           this.conversation.push({ role: 'assistant', content: reply });
+          this.saveConversation();
           return reply;
         }
       }
@@ -1576,6 +1617,7 @@ class AIVoicePipeline {
         if (reply) {
           const finalized = cleanReply(reply);
           this.conversation.push({ role: 'assistant', content: finalized });
+          this.saveConversation();
           return finalized;
         }
       }
@@ -1606,6 +1648,7 @@ class AIVoicePipeline {
           if (data.choices && data.choices[0] && data.choices[0].message) {
             const reply = data.choices[0].message.content.trim();
             this.conversation.push({ role: 'assistant', content: reply });
+            this.saveConversation();
             return reply;
           }
         }
@@ -1634,6 +1677,7 @@ class AIVoicePipeline {
           reply = reply.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
           if (reply) {
             this.conversation.push({ role: 'assistant', content: reply });
+            this.saveConversation();
             return reply;
           }
         }
@@ -1669,6 +1713,18 @@ class AIVoicePipeline {
     }
     if (qLower.includes('who are you') || qLower.includes('your name') || qLower.includes('what are you')) {
       return "I'm AIRA, your quick and friendly voice companion!";
+    }
+    if (qLower.includes('what is my name') || qLower.includes('who am i') || qLower.includes("what's my name") || qLower.includes('remember my name')) {
+      const savedName = localStorage.getItem('AIRA_USER_NAME');
+      if (savedName) return `Your name is ${savedName}!`;
+      return "I don't know your name yet. What should I call you?";
+    }
+    if (qLower.includes('what do you remember') || qLower.includes('what do you know about me') || qLower.includes('what did i tell you')) {
+      return "I remember our conversations and the facts you've shared with me!";
+    }
+    if (qLower.includes('forget everything') || qLower.includes('clear memory') || qLower.includes('reset memory')) {
+      this.clearMemory();
+      return "I have cleared my memory. We can start fresh anytime!";
     }
     if (/^(hi|hello|hey|greetings|morning|afternoon|evening)\b/.test(qLower)) {
       return pickDifferent([

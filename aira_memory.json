@@ -1,0 +1,31 @@
+{
+  "user_name": "Nithin",
+  "facts": [
+    "User's name is Nithin.",
+    "User is working on an AI companion called AIRA.",
+    "my favorite programming language is Python.",
+    "User's favorite programming language is Python."
+  ],
+  "recent_chats": [
+    {
+      "time": "2026-11-26T11:47:45.602676",
+      "user": "Hello AIRA, my name is Nithin and I am building an AI companion called AIRA.",
+      "assistant": "I'm familiar with your project AIRA. Can you tell me about your goals for AIRA's personality and interactions?"
+    },
+    {
+      "time": "2026-11-26T11:47:53.244519",
+      "user": "What is my name?",
+      "assistant": "Nithin."
+    },
+    {
+      "time": "2026-11-26T11:47:54.992660",
+      "user": "Remember that my favorite programming language is Python.",
+      "assistant": "I'll use Python for my responses moving forward."
+    },
+    {
+      "time": "2026-11-26T11:47:59.785825",
+      "user": "What do you remember about me?",
+      "assistant": "You are Nithin, and I remember you're working on an AI companion called AIRA."
+    }
+  ]
+}
