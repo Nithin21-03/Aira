@@ -26,6 +26,66 @@
       "time": "2026-11-26T11:47:59.785825",
       "user": "What do you remember about me?",
       "assistant": "You are Nithin, and I remember you're working on an AI companion called AIRA."
+    },
+    {
+      "time": "2026-11-26T12:10:09.567454",
+      "user": "Send an email to alex@gmail.com about Project AIRA saying the prototype is ready for review",
+      "assistant": "I've drafted that email to alex@gmail.com with the subject 'Project aira saying the prototype is ready for review'. It is ready to review and send!"
+    },
+    {
+      "time": "2026-11-26T12:10:09.669869",
+      "user": "Take a note that I need to schedule team demo on Friday",
+      "assistant": "I've saved that note for you: 'I need to schedule team demo on Friday'."
+    },
+    {
+      "time": "2026-11-26T12:10:09.922390",
+      "user": "Open YouTube",
+      "assistant": "Opening Youtube for you now!"
+    },
+    {
+      "time": "2026-11-26T12:10:37.991302",
+      "user": "Explain how photosynthesis works in plants in one sentence.",
+      "assistant": "Photosynthesis in plants occurs when chlorophyll, a green pigment, absorbs sunlight, water, and carbon dioxide, producing glucose and oxygen."
+    },
+    {
+      "time": "2026-11-26T12:15:08.375493",
+      "user": "Send an email to alex@gmail.com about Project AIRA saying the prototype is ready for review",
+      "assistant": "I've drafted that email to alex@gmail.com with the subject 'Project aira saying the prototype is ready for review'. It is ready to review and send!"
+    },
+    {
+      "time": "2026-11-26T12:15:08.672767",
+      "user": "Take a note that I need to schedule team demo on Friday",
+      "assistant": "I've saved that note for you: 'I need to schedule team demo on Friday'."
+    },
+    {
+      "time": "2026-11-26T12:15:09.792619",
+      "user": "Open YouTube",
+      "assistant": "Opening Youtube for you now!"
+    },
+    {
+      "time": "2026-11-26T12:15:23.274706",
+      "user": "Explain how photosynthesis works in plants in one sentence.",
+      "assistant": "Plants use sunlight, water, and carbon dioxide to produce glucose and oxygen through the process of photosynthesis."
+    },
+    {
+      "time": "2026-11-26T12:19:27.709991",
+      "user": "send an email to sarah@techcorp.com with subject Q4 Review saying all deliverables are finished",
+      "assistant": "I've drafted that email to sarah@techcorp.com with the subject 'Q4 review saying all deliverables are finished'. It is ready to review and send!"
+    },
+    {
+      "time": "2026-11-26T12:19:31.444709",
+      "user": "create a note that system architecture has been upgraded to dual models",
+      "assistant": "I've saved that note for you: 'system architecture has been upgraded to dual models'."
+    },
+    {
+      "time": "2026-11-26T12:19:34.571520",
+      "user": "open youtube",
+      "assistant": "Opening Youtube for you now!"
+    },
+    {
+      "time": "2026-11-26T12:19:57.047215",
+      "user": "send an email to boss@company.com saying sales report is ready",
+      "assistant": "I've drafted that email to boss@company.com with the subject 'Message regarding sales report is ready...'. It is ready to review and send!"
     }
   ]
 }

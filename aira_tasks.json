@@ -1,0 +1,42 @@
+[
+  {
+    "id": "task_email_1795675209",
+    "type": "email",
+    "recipient": "alex@gmail.com",
+    "subject": "Project aira saying the prototype is ready for review",
+    "body": "the prototype is ready for review",
+    "mailto_url": "mailto:alex@gmail.com?subject=Project%20aira%20saying%20the%20prototype%20is%20ready%20for%20review&body=the%20prototype%20is%20ready%20for%20review",
+    "status": "prepared",
+    "created_at": "2026-11-26T12:10:09.528781"
+  },
+  {
+    "id": "task_email_1795675508",
+    "type": "email",
+    "recipient": "alex@gmail.com",
+    "subject": "Project aira saying the prototype is ready for review",
+    "body": "the prototype is ready for review",
+    "mailto_url": "mailto:alex@gmail.com?subject=Project%20aira%20saying%20the%20prototype%20is%20ready%20for%20review&body=the%20prototype%20is%20ready%20for%20review",
+    "status": "prepared",
+    "created_at": "2026-11-26T12:15:08.276380"
+  },
+  {
+    "id": "task_email_1795675767",
+    "type": "email",
+    "recipient": "sarah@techcorp.com",
+    "subject": "Q4 review saying all deliverables are finished",
+    "body": "all deliverables are finished",
+    "mailto_url": "mailto:sarah@techcorp.com?subject=Q4%20review%20saying%20all%20deliverables%20are%20finished&body=all%20deliverables%20are%20finished",
+    "status": "prepared",
+    "created_at": "2026-11-26T12:19:27.608279"
+  },
+  {
+    "id": "task_email_1795675796",
+    "type": "email",
+    "recipient": "boss@company.com",
+    "subject": "Message regarding sales report is ready...",
+    "body": "sales report is ready",
+    "mailto_url": "mailto:boss@company.com?subject=Message%20regarding%20sales%20report%20is%20ready...&body=sales%20report%20is%20ready",
+    "status": "prepared",
+    "created_at": "2026-11-26T12:19:56.997186"
+  }
+]

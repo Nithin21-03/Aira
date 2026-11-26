@@ -1,0 +1,19 @@
+[
+  {
+    "id": "note_1795675209",
+    "content": "I need to schedule team demo on Friday",
+    "created_at": "2026-11-26T12:10:09.644078"
+  },
+  {
+    "id": "note_1795675508",
+    "type": "note",
+    "content": "I need to schedule team demo on Friday",
+    "created_at": "2026-11-26T12:15:08.587380"
+  },
+  {
+    "id": "note_1795675771",
+    "type": "note",
+    "content": "system architecture has been upgraded to dual models",
+    "created_at": "2026-11-26T12:19:31.391659"
+  }
+]

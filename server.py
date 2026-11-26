@@ -165,6 +165,183 @@ def extract_and_update_memory(user_text: str, assistant_reply: str = None):
         save_memory(mem)
         print(f"[AIRA Memory] Saved memory. Name: {mem.get('user_name')}, Total facts: {len(mem.get('facts', []))}")
 
+import urllib.parse
+
+class ExecutiveDecisionEngine:
+    """
+    Model 2: Executive Decision-Making & Task Execution Engine.
+    Handles decision making, task planning, and external actions (emails, notes, web, apps).
+    """
+    def __init__(self, base_dir: str):
+        self.base_dir = base_dir
+        self.tasks_file = os.path.join(base_dir, "aira_tasks.json")
+        self.notes_file = os.path.join(base_dir, "aira_notes.json")
+        self.lock = threading.Lock()
+
+    def analyze_and_execute(self, user_prompt: str, user_name: str = None) -> dict:
+        p = (user_prompt or "").strip()
+        p_lower = p.lower()
+        import re
+
+        # 1. Email Task
+        if any(k in p_lower for k in ["send email", "send an email", "send a mail", "send mail", "draft email", "compose email", "email to", "mail to"]):
+            to_match = re.search(r'(?:to|email to|mail to)\s+([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+|[A-Z][a-z]+|[a-z]+)', p, re.IGNORECASE)
+            recipient = to_match.group(1).strip() if to_match else "recipient"
+            
+            body_match = re.search(r'(?:saying|that|content|message|body)\s+(.*)', p, re.IGNORECASE)
+            if body_match:
+                body = body_match.group(1).strip()
+            else:
+                body = f"Hello {recipient},\n\nHope you are doing well.\n\nBest regards,\n{user_name or 'AIRA User'}"
+            
+            subj_match = re.search(r'(?:subject|about)\s+([^,.]+)', p, re.IGNORECASE)
+            if subj_match:
+                subject = subj_match.group(1).strip().capitalize()
+            else:
+                subject = f"Message regarding {body[:25].strip()}..."
+
+            mailto_url = f"mailto:{recipient}?subject={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
+            
+            from datetime import datetime
+            task_entry = {
+                "id": f"task_email_{int(datetime.now().timestamp())}",
+                "type": "email",
+                "recipient": recipient,
+                "subject": subject,
+                "body": body,
+                "mailto_url": mailto_url,
+                "status": "prepared",
+                "created_at": datetime.now().isoformat()
+            }
+            self._append_task(task_entry)
+            
+            return {
+                "is_task": True,
+                "task_type": "email",
+                "details": task_entry,
+                "feedback": f"I've drafted that email to {recipient} with the subject '{subject}'. It is ready to review and send!"
+            }
+
+        # 2. Note Creation Task
+        if any(k in p_lower for k in ["take a note", "create a note", "note that", "save a note", "add a note"]):
+            content_match = re.search(r'(?:note that|create a note that|take a note that|to|that)\s+(.*)', p, re.IGNORECASE)
+            content = content_match.group(1).strip() if content_match else p
+            from datetime import datetime
+            note_entry = {
+                "id": f"note_{int(datetime.now().timestamp())}",
+                "type": "note",
+                "content": content,
+                "created_at": datetime.now().isoformat()
+            }
+            self._append_note(note_entry)
+            return {
+                "is_task": True,
+                "task_type": "note",
+                "details": note_entry,
+                "feedback": f"I've saved that note for you: '{content}'."
+            }
+
+        # 3. Read Notes Task
+        if any(k in p_lower for k in ["read my notes", "what are my notes", "show my notes", "get my notes", "check my notes"]):
+            notes = self._load_notes()
+            if notes:
+                recent = [n.get("content", "") for n in notes[-3:]]
+                return {
+                    "is_task": True,
+                    "task_type": "read_notes",
+                    "details": {"type": "read_notes", "notes": notes},
+                    "feedback": f"You have {len(notes)} saved notes. Recent ones: {'; '.join(recent)}."
+                }
+            return {
+                "is_task": True,
+                "task_type": "read_notes",
+                "details": {"type": "read_notes", "notes": []},
+                "feedback": "You don't have any notes saved yet."
+            }
+
+        # 4. Open Website / Desktop App Task
+        sites = {
+            "youtube": "https://www.youtube.com",
+            "google": "https://www.google.com",
+            "github": "https://www.github.com",
+            "gmail": "https://mail.google.com",
+            "twitter": "https://twitter.com",
+            "reddit": "https://www.reddit.com",
+            "linkedin": "https://www.linkedin.com"
+        }
+        for site_key, site_url in sites.items():
+            if f"open {site_key}" in p_lower or f"launch {site_key}" in p_lower:
+                return {
+                    "is_task": True,
+                    "task_type": "open_url",
+                    "details": {"type": "open_url", "name": site_key.capitalize(), "url": site_url},
+                    "feedback": f"Opening {site_key.capitalize()} for you now!"
+                }
+
+        # 5. Search Web Task
+        if p_lower.startswith(("search for", "google for", "search web for", "look up")):
+            q_match = re.search(r'(?:search for|google for|search web for|look up)\s+(.*)', p, re.IGNORECASE)
+            query = q_match.group(1).strip() if q_match else p
+            search_url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
+            return {
+                "is_task": True,
+                "task_type": "web_search",
+                "details": {"type": "web_search", "query": query, "url": search_url},
+                "feedback": f"Searching the web for '{query}'."
+            }
+
+        return {"is_task": False}
+
+    def _append_task(self, task):
+        with self.lock:
+            try:
+                tasks = []
+                if os.path.exists(self.tasks_file):
+                    with open(self.tasks_file, "r", encoding="utf-8") as f:
+                        tasks = json.load(f)
+                tasks.append(task)
+                with open(self.tasks_file, "w", encoding="utf-8") as f:
+                    json.dump(tasks, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                print(f"[Executive Engine] Notice saving task: {e}")
+
+    def _append_note(self, note):
+        with self.lock:
+            try:
+                notes = self._load_notes()
+                notes.append(note)
+                with open(self.notes_file, "w", encoding="utf-8") as f:
+                    json.dump(notes, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                print(f"[Executive Engine] Notice saving note: {e}")
+
+    def _load_notes(self):
+        try:
+            if os.path.exists(self.notes_file):
+                with open(self.notes_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        return data
+        except Exception:
+            pass
+        return []
+
+    def load_tasks(self):
+        try:
+            if os.path.exists(self.tasks_file):
+                with open(self.tasks_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        return data
+        except Exception:
+            pass
+        return []
+
+    def load_notes(self):
+        return self._load_notes()
+
+executive_engine = ExecutiveDecisionEngine(BASE_DIR)
+
 def get_hf_token():
     return os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or ""
 
@@ -476,6 +653,9 @@ def chat_completion(payload: dict):
     token = payload.get("token") or get_hf_token()
     model = payload.get("model", "meta-llama/Llama-3.1-8B-Instruct")
     raw_messages = payload.get("messages", [])
+    prompt_fallback = payload.get("prompt", "")
+    if prompt_fallback and not raw_messages:
+        raw_messages = [{"role": "user", "content": prompt_fallback}]
     
     # Filter out empty or broken messages
     messages = [m for m in raw_messages if m.get("content") and str(m.get("content")).strip()]
@@ -484,6 +664,8 @@ def chat_completion(payload: dict):
         if m.get("role") == "user":
             user_prompt = str(m.get("content", "")).strip()
             break
+    if not user_prompt and prompt_fallback:
+        user_prompt = str(prompt_fallback).strip()
 
     # Human-like, intelligent, knowledgeable voice assistant persona with persistent memory
     mem_summary = get_memory_prompt_summary()
@@ -504,6 +686,28 @@ def chat_completion(payload: dict):
     chat_messages = [system_msg] + filtered_history
 
     active_model = get_best_ollama_model()
+
+    # Model 2: Executive Decision-Making & Task Execution Engine
+    mem = load_memory()
+    user_name = mem.get("user_name")
+    task_decision = executive_engine.analyze_and_execute(user_prompt, user_name)
+
+    if task_decision.get("is_task"):
+        feedback = task_decision.get("feedback", "Task completed.")
+        task_details = task_decision.get("details", {})
+        if payload.get("stream"):
+            def task_stream():
+                yield f"data: {json.dumps({'content': feedback, 'task': task_details})}\n\n"
+                yield "data: [DONE]\n\n"
+                threading.Thread(target=extract_and_update_memory, args=(user_prompt, feedback), daemon=True).start()
+            return StreamingResponse(task_stream(), media_type="text/event-stream")
+        
+        threading.Thread(target=extract_and_update_memory, args=(user_prompt, feedback), daemon=True).start()
+        return {
+            "reply": feedback,
+            "task": task_details,
+            "source": "model_2_executive_task_engine"
+        }
 
     # 1. Handle live streaming if requested
     if payload.get("stream"):
@@ -724,6 +928,24 @@ def add_memory_api(payload: dict):
 def clear_memory_api():
     save_memory({"user_name": None, "facts": [], "recent_chats": []})
     return {"status": "cleared", "message": "Memory reset successfully."}
+
+@app.get("/api/tasks")
+def get_tasks_api():
+    return {"tasks": executive_engine.load_tasks()}
+
+@app.get("/api/notes")
+def get_notes_api():
+    return {"notes": executive_engine.load_notes()}
+
+@app.post("/api/notes")
+def add_note_api(payload: dict):
+    content = payload.get("content", "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Note content required.")
+    from datetime import datetime
+    note = {"id": f"note_{int(datetime.now().timestamp())}", "content": content, "created_at": datetime.now().isoformat()}
+    executive_engine._append_note(note)
+    return {"status": "ok", "note": note}
 
 if __name__ == "__main__":
     import uvicorn
