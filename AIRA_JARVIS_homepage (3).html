@@ -451,20 +451,71 @@ function setState(s){
 }
 const dialogueEl = $('voice-dialogue');
 let silenceTimer = null;
+let speechQueue = [];
+let isQueueActive = false;
+
+function clearSpeechQueue() {
+  speechQueue = [];
+  isQueueActive = false;
+  stopSpeech();
+}
+
+function queueSpeechChunk(chunk) {
+  if (!chunk || !chunk.trim()) return;
+  speechQueue.push(chunk.trim());
+  if (!isQueueActive) {
+    playNextQueuedSpeech();
+  }
+}
+
+function playNextQueuedSpeech() {
+  if (speechQueue.length === 0) {
+    isQueueActive = false;
+    if (state === 'speaking') setState('idle');
+    return;
+  }
+  isQueueActive = true;
+  const nextChunk = speechQueue.shift();
+  speakAIRAReply(nextChunk, null, () => {
+    playNextQueuedSpeech();
+  });
+}
 
 async function sendPrompt(userText) {
   if (!userText || !userText.trim()) return;
   const q = userText.trim();
-  stopSpeech();
+  clearSpeechQueue();
   clearTimeout(silenceTimer);
   if (dialogueEl) dialogueEl.textContent = 'You: "' + q + '"';
   setState('thinking');
   try {
+    let unvoicedBuffer = '';
+    let hasVoicedAny = false;
+
     const replyText = await aiPipeline.generateReply(q, (streamChunk) => {
       if (dialogueEl) dialogueEl.textContent = 'AIRA: "' + streamChunk + '..."';
+
+      // Live Sub-Second Streaming Speech: Voice sentence 1 immediately when complete!
+      unvoicedBuffer = streamChunk;
+      if (!hasVoicedAny) {
+        const sentenceMatch = unvoicedBuffer.match(/^([^\.\!\?]+[\.\!\?])\s+(.*)/);
+        if (sentenceMatch && sentenceMatch[1] && sentenceMatch[1].trim().split(/\s+/).length >= 3) {
+          hasVoicedAny = true;
+          queueSpeechChunk(sentenceMatch[1].trim());
+        }
+      }
     });
+
     if (dialogueEl) dialogueEl.textContent = 'AIRA: "' + replyText + '"';
-    speakAIRAReply(replyText);
+
+    if (!hasVoicedAny) {
+      queueSpeechChunk(replyText);
+    } else {
+      const sentenceMatch = replyText.match(/^([^\.\!\?]+[\.\!\?])\s+(.*)/);
+      if (sentenceMatch && sentenceMatch[2] && sentenceMatch[2].trim()) {
+        queueSpeechChunk(sentenceMatch[2].trim());
+      }
+    }
   } catch (err) {
     console.error('Error generating reply:', err);
     setState('idle');
@@ -488,12 +539,12 @@ async function handleMicClick() {
         if (text && text.trim()) {
           speechDetected = true;
           if (dialogueEl) dialogueEl.textContent = 'You: "' + text.trim() + '"';
-          // Auto-submit after 1200ms of natural pause once user speaks
+          // Auto-submit after 750ms of natural pause once user speaks
           clearTimeout(silenceTimer);
           clearTimeout(silenceAfterSpeechTimer);
           silenceAfterSpeechTimer = setTimeout(() => {
             if (state === 'listening') handleMicClick();
-          }, 1200);
+          }, 750);
         }
       },
       err => {
@@ -527,7 +578,7 @@ async function handleMicClick() {
             if (!silenceAfterSpeechTimer) {
               silenceAfterSpeechTimer = setTimeout(() => {
                 if (state === 'listening') handleMicClick();
-              }, 1250);
+              }, 750);
             }
           } else {
             if (dialogueEl) dialogueEl.textContent = 'Listening... (Speak naturally 🎙️)';
@@ -579,30 +630,45 @@ async function handleMicClick() {
   }
 }
 
-async function speakAIRAReply(text, audioBytes) {
+async function speakAIRAReply(text, audioBytes, onDone) {
   if (audioBytes) {
     setState('speaking');
     try {
       await lipSync.speak(audioBytes);
     } catch(e) {
       console.warn('LipSync audio error, falling back to speech synthesis:', e);
-      speakTextWithVisemes(text);
+      speakTextWithVisemes(text, onDone);
       return;
     }
     setState('idle');
+    if (onDone) onDone();
   } else {
-    speakTextWithVisemes(text);
+    speakTextWithVisemes(text, onDone);
   }
 }
 
-function speakTextWithVisemes(rawText) {
-  if (!rawText) return;
+function speakTextWithVisemes(rawText, onDone) {
+  let doneCalled = false;
+  const finish = () => {
+    if (!doneCalled) {
+      doneCalled = true;
+      if (onDone) onDone();
+    }
+  };
+
+  if (!rawText) {
+    finish();
+    return;
+  }
   const text = rawText
     .replace(/[*_#`~\[\]]/g, '')
     .replace(/^\s*[-•\d.]+\s+/gm, '')
     .replace(/\s+/g, ' ')
     .trim();
-  if (!text) return;
+  if (!text) {
+    finish();
+    return;
+  }
   stopSpeech();
   const rate = 1.05;
   const tl = buildTL(text, rate);
@@ -616,7 +682,10 @@ function speakTextWithVisemes(rawText) {
         if (window.speechSynthesis.paused) window.speechSynthesis.resume();
       } catch(e){}
       spkTimer = setTimeout(() => {
-        if (!sp || sp.text !== text) return;
+        if (!sp || sp.text !== text) {
+          finish();
+          return;
+        }
         utt = new SpeechSynthesisUtterance(text);
         utt.rate = rate;
         utt.pitch = 1.02;
@@ -649,15 +718,18 @@ function speakTextWithVisemes(rawText) {
             sp.ended = true;
             if (state === 'speaking') setState('idle');
           }
+          finish();
         };
         utt.onerror = () => {
           if (state === 'speaking') setState('idle');
+          finish();
         };
         try {
           if (window.speechSynthesis.paused) window.speechSynthesis.resume();
           window.speechSynthesis.speak(utt);
         } catch(e) {
           if (state === 'speaking') setState('idle');
+          finish();
         }
 
         // Hard safety watchdog: guarantees avatar never gets stuck in 'speaking'
@@ -667,11 +739,15 @@ function speakTextWithVisemes(rawText) {
             sp.ended = true;
             setState('idle');
           }
+          finish();
         }, maxDurationMs);
       }, 60);
+    } else {
+      finish();
     }
   } catch (e) {
     if (state === 'speaking') setState('idle');
+    finish();
   }
 }
 
@@ -1473,13 +1549,13 @@ class AIVoicePipeline {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'qwen2.5:0.5b',
+          model: 'llama3.2:1b',
           messages,
           stream: false,
           keep_alive: -1,
-          options: { temperature: 0.65, num_predict: 18, num_thread: 4 }
+          options: { temperature: 0.6, num_predict: 90, num_thread: 4 }
         }),
-        signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(2000) : undefined
+        signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(20000) : undefined
       });
       if (res.ok) {
         const data = await res.json();
@@ -1623,23 +1699,30 @@ class AIVoicePipeline {
       return "Catch you later! Have a wonderful day!";
     }
 
-    // Dynamic contextual extraction for unfamiliar questions
-    const words = (qLower.match(/[a-z]{4,}/g) || []).filter(w => !['what', 'when', 'where', 'which', 'about', 'there', 'their', 'could', 'would', 'should', 'tell', 'know', 'some', 'from', 'this', 'that'].includes(w));
-    if (words.length > 0) {
-      const topic = words[words.length - 1];
-      return pickDifferent([
-        `That's really interesting regarding ${topic}! Tell me more about what you think.`,
-        `I love exploring thoughts on ${topic}. What specific part are you curious about?`,
-        `Great question about ${topic}! I'm all ears—let's dive deeper into it.`
-      ]);
+    // Common factual questions
+    if (qLower.includes('prime minister of india') || qLower.includes('pm of india')) {
+      return "Narendra Modi is the Prime Minister of India.";
+    }
+    if (qLower.includes('president of the us') || qLower.includes('president of the united states') || qLower.includes('us president')) {
+      return "Joe Biden is the President of the United States.";
+    }
+    if (qLower.includes('capital of france')) {
+      return "The capital of France is Paris.";
+    }
+    if (qLower.includes('capital of india')) {
+      return "The capital of India is New Delhi.";
+    }
+    if (qLower.includes('grass green') || qLower.includes('grass is green')) {
+      return "Grass is green because of chlorophyll, a pigment that plants use to absorb sunlight for photosynthesis.";
+    }
+    if (qLower.includes('sky blue') || qLower.includes('sky is blue')) {
+      return "The sky looks blue because the atmosphere scatters shorter blue wavelengths of sunlight more than other colors.";
+    }
+    if (qLower.includes('can you hear me') || qLower.includes('hear me') || qLower.includes('are you there')) {
+      return "Yes, I hear you loud and clear! How can I help you today?";
     }
 
-    return pickDifferent([
-      "I'm listening closely! What would you like to talk about next?",
-      "Sounds intriguing! Tell me more about that.",
-      "I hear you loud and clear! What's next on our agenda?",
-      "I'm right here with you! What are you feeling up to exploring?"
-    ]);
+    return "I am having trouble reaching my local AI brain. Please ensure Ollama is running and ask me again!";
   }
 
   async synthesize(text) {

@@ -261,22 +261,21 @@ def generate_dynamic_fallback(prompt_text: str) -> str:
         from datetime import datetime
         return f"Today is {datetime.now().strftime('%A, %B %d, %Y')}."
 
-    # Dynamic contextual response using user query keywords
-    words = [w for w in re.findall(r'\b[a-zA-Z]{4,}\b', q) if w not in ("what", "when", "where", "which", "about", "there", "their", "could", "would", "should", "tell", "know")]
-    if words:
-        topic = words[-1]
-        return random.choice([
-            f"That's really interesting regarding {topic}! Tell me more about what you think.",
-            f"I was just thinking about {topic} too! What aspect would you like to explore?",
-            f"Great question about {topic}! I'm all ears—let's dive deeper into it."
-        ])
+    # Common questions
+    if any(k in q for k in ["prime minister of india", "pm of india"]):
+        return "Narendra Modi is the Prime Minister of India."
+    if any(k in q for k in ["president of the united states", "president of the us", "president of us", "us president"]):
+        return "Joe Biden is the President of the United States."
+    if any(k in q for k in ["capital of france"]):
+        return "The capital of France is Paris."
+    if any(k in q for k in ["capital of india"]):
+        return "The capital of India is New Delhi."
+    if any(k in q for k in ["grass green", "grass is green"]):
+        return "Grass is green because of chlorophyll, a green pigment that helps plants absorb sunlight for photosynthesis."
+    if any(k in q for k in ["sky blue", "sky is blue"]):
+        return "The sky appears blue because Earth's atmosphere scatters shorter blue wavelengths of sunlight more than other colors."
 
-    return random.choice([
-        "I'm listening closely! What would you like to talk about next?",
-        "Sounds good! Tell me more about that.",
-        "I'm here with you—what shall we tackle today?",
-        "I hear you loud and clear! What's next on our agenda?"
-    ])
+    return "I'm having a brief issue reaching my local AI brain. Please make sure Ollama is active, and ask me again in just a second!"
 
 def get_best_ollama_model():
     try:
@@ -284,9 +283,10 @@ def get_best_ollama_model():
         with urllib.request.urlopen(req, timeout=1.0) as r:
             data = json.loads(r.read().decode("utf-8"))
             installed = [m.get("name", "") for m in data.get("models", [])]
-            for candidate in ["llama3.2:1b", "llama3.2", "qwen2.5:0.5b"]:
+            # Prioritize Llama 3.2 1B for fastest CPU turnaround with high intelligence & full punchlines
+            for candidate in ["llama3.2:1b", "llama3.2:latest", "llama3.2:3b", "llama3.2", "qwen2.5:0.5b"]:
                 for name in installed:
-                    if candidate in name:
+                    if candidate == name or (candidate in name and "qwen" not in name):
                         return name
     except Exception:
         pass
@@ -340,13 +340,13 @@ def chat_completion(payload: dict):
             user_prompt = str(m.get("content", "")).strip()
             break
 
-    # Human-like, intelligent, warm conversational persona with complete answers
+    # Human-like, intelligent, knowledgeable voice assistant persona
     system_msg = {
         "role": "system",
         "content": (
-            "You are AIRA, a super-smart, friendly, and helpful voice assistant. "
-            "Give clear, accurate, and direct answers in 1 to 2 complete sentences. "
-            "Always finish your thoughts cleanly with proper punctuation."
+            "You are AIRA, a brilliant, direct, and knowledgeable AI voice assistant. "
+            "Give an accurate, factual, and complete answer in 1 or 2 concise sentences. "
+            "Never leave a thought or sentence unfinished. Always include the full punchline or conclusion."
         )
     }
 
@@ -367,14 +367,14 @@ def chat_completion(payload: dict):
                     "stream": True,
                     "keep_alive": -1,
                     "options": {
-                        "temperature": 0.7,
-                        "num_predict": 60,
+                        "temperature": 0.6,
+                        "num_predict": 90,
                         "num_thread": 4,
                         "num_ctx": 512
                     }
                 }).encode("utf-8")
                 req = urllib.request.Request(ollama_url, data=ollama_body, headers={"Content-Type": "application/json"})
-                with urllib.request.urlopen(req, timeout=18) as resp:
+                with urllib.request.urlopen(req, timeout=30) as resp:
                     full_content = ""
                     for line in resp:
                         if line.strip():
@@ -402,8 +402,8 @@ def chat_completion(payload: dict):
             "stream": False,
             "keep_alive": -1,
             "options": {
-                "temperature": 0.7,
-                "num_predict": 60,
+                "temperature": 0.6,
+                "num_predict": 90,
                 "num_thread": 4,
                 "num_ctx": 512
             }
@@ -413,7 +413,7 @@ def chat_completion(payload: dict):
             data=ollama_body,
             headers={"Content-Type": "application/json"}
         )
-        with urllib.request.urlopen(ollama_req, timeout=18) as ollama_resp:
+        with urllib.request.urlopen(ollama_req, timeout=30) as ollama_resp:
             odata = json.loads(ollama_resp.read().decode("utf-8"))
             oreply = odata.get("message", {}).get("content", "").strip()
             if oreply:
